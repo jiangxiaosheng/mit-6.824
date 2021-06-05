@@ -6,24 +6,51 @@ package mr
 // remember to capitalize all names.
 //
 
-import "os"
+import (
+	"os"
+	"time"
+)
 import "strconv"
 
-//
-// example to show how to declare the arguments
-// and reply for an RPC.
-//
-
-type ExampleArgs struct {
-	X int
+type RegisterRequest struct {
+	Address  string
+	Hostname string
 }
 
-type ExampleReply struct {
-	Y int
+type RegisterResponse struct {
+}
+
+type HeartbeatRequest struct {
+	WorkerAddr      string
+	LastHealthyTime time.Time
+}
+
+type HeartbeatResponse struct {
+}
+
+type RunMRRequest struct {
+	JobName string
+	Inputs  []string
+
+	// filename of the go plugin which provides map and reduce function, usually named with .so
+	ExecutableApp string
+}
+
+type RunMRResponse struct {
+}
+
+type DoMapTaskRequest struct {
+	InputFile     string
+	ExecutableApp string
+	JobName       string
+	TaskId        int
+	TaskName      string
+}
+
+type DoMapTaskResponse struct {
 }
 
 // Add your RPC definitions here.
-
 
 // Cook up a unique-ish UNIX-domain socket name
 // in /var/tmp, for the master.

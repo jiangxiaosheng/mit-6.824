@@ -9,8 +9,11 @@ package main
 // Please do not change this file.
 //
 
-import "../mr"
-import "time"
+import (
+	"../mr"
+	"context"
+	"flag"
+)
 import "os"
 import "fmt"
 
@@ -20,10 +23,11 @@ func main() {
 		os.Exit(1)
 	}
 
-	m := mr.MakeMaster(os.Args[1:], 10)
-	for m.Done() == false {
-		time.Sleep(time.Second)
-	}
+	flag.BoolVar(&mr.DebugMode, "debug", false, "used for debugging")
+	flag.Parse()
 
-	time.Sleep(time.Second)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	mr.MakeMaster(ctx, os.Args[1:], 10)
 }
