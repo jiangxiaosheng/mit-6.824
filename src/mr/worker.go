@@ -10,12 +10,17 @@ import (
 	"net/http"
 	"net/rpc"
 	"os"
+	"path/filepath"
 	"plugin"
 	"strconv"
 )
 
 const (
 	MasterAddr = "127.0.0.1:4567"
+)
+
+var (
+	tempDir, _ = filepath.Abs("../../.mrtemp")
 )
 
 type Worker struct {
@@ -76,8 +81,71 @@ func (w *Worker) DoMapTask(req *DoMapTaskRequest, resp *DoMapTaskResponse) error
 	}
 
 	kvs := mapf(req.InputFile, string(inputContents))
-	Infoln(kvs)
 
+	spill(kvs, req.NReduce, req.JobName, req.TaskId)
+
+	resp.State = Successful
+	return nil
+}
+
+func (w *Worker) DoReduceTask(req *DoReduceTaskRequest, resp *DoReduceTaskResponse) error {
+	_, reducef := loadPlugin(req.ExecutableApp)
+	Infof("worker %v:%v received reduce task %v", w.Host, w.Port, req.TaskName)
+
+	outputs := make([]string, 0)
+
+	for _, info := range req.MapOutputInfos {
+		fetchReq := &FetchMapOutputRequest{
+			MapTaskId:    info.MapTaskId,
+			ReduceTaskId: req.TaskId,
+			JobName:      req.JobName,
+		}
+		fetchReply := &FetchMapOutputResponse{}
+
+		if w.callWorker(info.WorkerAddr, "Worker.FetchMapOutput", fetchReq, fetchReply) == false {
+			Errorf("fetch map output from worker %v failed", info.WorkerAddr)
+		}
+		outputs = append(outputs, fetchReply.MapOutputPath)
+		Debugf("%v", outputs)
+	}
+
+	sortedKVs := merge(outputs)
+
+	fn := fmt.Sprintf("%v-%v", req.JobName, req.TaskId)
+	outputFile, err := os.Create(filepath.Join(req.OutputDir, fn))
+	if err != nil {
+		Errorf("open output file %v failed, %v", fn, err)
+		return err
+	}
+	i := 0
+	for i < len(sortedKVs) {
+		j := i + 1
+		for j < len(sortedKVs) && sortedKVs[j].Key == sortedKVs[i].Key {
+			j++
+		}
+		var values []string
+		for k := i; k < j; k++ {
+			values = append(values, sortedKVs[k].Value)
+		}
+		output := reducef(sortedKVs[i].Key, values)
+
+		// this is the correct format for each line of Reduce output.
+		_, err = fmt.Fprintf(outputFile, "%v %v\n", sortedKVs[i].Key, output)
+		if err != nil {
+			Errorf("write KeyValues to file %v failed, %v", fn, err)
+			return err
+		}
+
+		i = j
+	}
+
+	return nil
+}
+
+// FetchMapOutput assumes all workers mounting a shared file system, so just sets the output file path.
+func (w *Worker) FetchMapOutput(req *FetchMapOutputRequest, resp *FetchMapOutputResponse) error {
+	path := filepath.Join(tempDir, req.JobName, fmt.Sprintf("%v-%v-%v", req.JobName, req.MapTaskId, req.ReduceTaskId))
+	resp.MapOutputPath = path
 	return nil
 }
 
@@ -118,16 +186,6 @@ func ihash(key string) int {
 	return int(h.Sum32() & 0x7fffffff)
 }
 
-// Worker
-// main/mrworker.go calls this function.
-//
-func (w *Worker) RunMR(mapf func(string, string) []KeyValue,
-	reducef func(string, []string) string) {
-
-	// Your worker implementation here.
-
-}
-
 // call
 // send an RPC request to the master, wait for the response.
 // usually returns true.
@@ -135,6 +193,22 @@ func (w *Worker) RunMR(mapf func(string, string) []KeyValue,
 //
 func (w *Worker) callMaster(rpcname string, args interface{}, reply interface{}) bool {
 	err := w.client.Call(rpcname, args, reply)
+	if err == nil {
+		return true
+	}
+
+	Errorln(err)
+	return false
+}
+
+func (w *Worker) callWorker(workerAddr string, rpcname string, args interface{}, reply interface{}) bool {
+	client, err := rpc.DialHTTP("tcp", workerAddr)
+	if err != nil {
+		Errorln("dialing:", err)
+		return false
+	}
+
+	err = client.Call(rpcname, args, reply)
 	if err == nil {
 		return true
 	}

@@ -17,11 +17,11 @@ type task interface {
 
 type mapTask struct {
 	inputFile     string
-	outputFile    string
 	taskId        int
 	workerAddr    string
 	jobName       string
 	executableApp string
+	nReduce       int
 }
 
 func (m *mapTask) taskName() string {
@@ -29,12 +29,15 @@ func (m *mapTask) taskName() string {
 }
 
 type reduceTask struct {
+	jobName        string
+	taskId         int
+	inputDir       string
+	outputDir      string
+	workerAddr     string
+	executableApp  string
+	mapOutputInfos []MapOutputInfo
 }
 
-func doMap() {
-
-}
-
-func doReduce() {
-
+func (r *reduceTask) taskName() string {
+	return fmt.Sprintf("%v-reducetask-%v", r.jobName, r.taskId)
 }

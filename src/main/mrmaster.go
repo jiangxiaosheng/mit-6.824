@@ -14,20 +14,13 @@ import (
 	"context"
 	"flag"
 )
-import "os"
-import "fmt"
 
 func main() {
-	if len(os.Args) < 2 {
-		fmt.Fprintf(os.Stderr, "Usage: mrmaster inputfiles...\n")
-		os.Exit(1)
-	}
-
 	flag.BoolVar(&mr.DebugMode, "debug", false, "used for debugging")
 	flag.Parse()
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	mr.MakeMaster(ctx, os.Args[1:], 10)
+	mr.MakeMaster(ctx)
 }

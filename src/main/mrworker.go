@@ -17,20 +17,11 @@ import (
 	"sync"
 )
 import "plugin"
-import "os"
-import "fmt"
 import "log"
 
 func main() {
-	if len(os.Args) < 2 {
-		fmt.Fprintf(os.Stderr, "Usage: mrworker xxx.so\n")
-		os.Exit(1)
-	}
-
 	flag.BoolVar(&mr.DebugMode, "debug", false, "used for debugging")
 	flag.Parse()
-
-	mapf, reducef := loadPlugin(os.Args[1])
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -47,7 +38,6 @@ func main() {
 		wk.Serve()
 	}()
 
-	wk.RunMR(mapf, reducef)
 	wg.Wait()
 }
 

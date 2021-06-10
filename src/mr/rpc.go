@@ -29,15 +29,24 @@ type HeartbeatResponse struct {
 }
 
 type RunMRRequest struct {
-	JobName string
-	Inputs  []string
+	JobName   string
+	Inputs    []string
+	OutputDir string
+	NReduce   int
 
-	// filename of the go plugin which provides map and reduce function, usually named with .so
+	// filename of the go plugin which provides map and reduce function, usually suffixed by .so
 	ExecutableApp string
 }
 
 type RunMRResponse struct {
 }
+
+type TaskState int
+
+const (
+	Successful TaskState = iota
+	Failed
+)
 
 type DoMapTaskRequest struct {
 	InputFile     string
@@ -45,9 +54,40 @@ type DoMapTaskRequest struct {
 	JobName       string
 	TaskId        int
 	TaskName      string
+	NReduce       int
 }
 
 type DoMapTaskResponse struct {
+	State TaskState
+}
+
+type MapOutputInfo struct {
+	MapTaskId  int
+	WorkerAddr string
+}
+
+type DoReduceTaskRequest struct {
+	InputDir       string
+	ExecutableApp  string
+	JobName        string
+	TaskId         int
+	TaskName       string
+	OutputDir      string
+	MapOutputInfos []MapOutputInfo
+}
+
+type DoReduceTaskResponse struct {
+	State TaskState
+}
+
+type FetchMapOutputRequest struct {
+	MapTaskId    int
+	ReduceTaskId int
+	JobName      string
+}
+
+type FetchMapOutputResponse struct {
+	MapOutputPath string
 }
 
 // Add your RPC definitions here.

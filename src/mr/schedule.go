@@ -2,8 +2,10 @@ package mr
 
 import (
 	"context"
-	"fmt"
+	"path/filepath"
 	"stathat.com/c/consistent"
+	"sync"
+	"sync/atomic"
 	"time"
 )
 
@@ -40,31 +42,90 @@ func (s *Scheduler) init(ctx context.Context) {
 func (s *Scheduler) Schedule(j job) {
 	Infof("scheduling job %v", j.name)
 	mapTasks := s.genMapTasks(j)
-	s.distributeTasks(mapTasks)
+	s.distributeMapTasks(mapTasks)
+	reduceTasks := s.genReduceTasks(j, mapTasks)
+	s.distributeReduceTasks(reduceTasks)
 }
 
 // distributeTasks assumes that master and workers are using a shared file system like GFS
 // or local file system. So it only needs to tell receivers the location of the files rather than
 // the binary data.
-func (s *Scheduler) distributeTasks(tasks []*mapTask) {
+func (s *Scheduler) distributeMapTasks(tasks []*mapTask) {
 	if len(tasks) == 0 {
 		return
 	}
+
+	completedTasks := int32(0)
+	wg := sync.WaitGroup{}
+	jobname := tasks[0].jobName
+
 	for _, t := range tasks {
-		worker, _ := s.cHash.Get(t.taskName())
-		Infof("task %v is assigned to worker %v", t.taskName(), worker)
-		req := &DoMapTaskRequest{
-			InputFile:     t.inputFile,
-			ExecutableApp: t.executableApp,
-			JobName:       t.jobName,
-			TaskId:        t.taskId,
-			TaskName:      t.taskName(),
-		}
-		reply := &DoMapTaskResponse{}
-		if s.master.callWorker(worker, "Worker.DoMapTask", req, reply) == false {
-			Errorf("distributing task %v to worker %v failed", t.taskName(), worker)
-		}
+		wg.Add(1)
+		go func(t *mapTask) {
+			defer wg.Done()
+
+			Debugf("map task %v is assigned to worker %v", t.taskName(), t.workerAddr)
+			req := &DoMapTaskRequest{
+				InputFile:     t.inputFile,
+				ExecutableApp: t.executableApp,
+				JobName:       t.jobName,
+				TaskId:        t.taskId,
+				TaskName:      t.taskName(),
+				NReduce:       t.nReduce,
+			}
+			reply := &DoMapTaskResponse{}
+			if s.master.callWorker(t.workerAddr, "Worker.DoMapTask", req, reply) == false {
+				Errorf("distributing map task %v to worker %v failed", t.taskName(), t.workerAddr)
+			}
+			if reply.State == Successful {
+				atomic.AddInt32(&completedTasks, 1)
+				Infof("job %v is in map stage, %v/%v map task completed", jobname, atomic.LoadInt32(&completedTasks), len(tasks))
+			}
+			// TODO: fail-over
+		}(t)
 	}
+	wg.Wait()
+	Infof("job %v finished map stage, starting reduce stage", jobname)
+}
+
+func (s *Scheduler) distributeReduceTasks(tasks []*reduceTask) {
+	if len(tasks) == 0 {
+		return
+	}
+
+	jobname := tasks[0].jobName
+	wg := &sync.WaitGroup{}
+
+	completedTasks := int32(0)
+	for _, t := range tasks {
+		wg.Add(1)
+		go func(t *reduceTask) {
+			defer wg.Done()
+
+			Debugf("reduce task %v is assigned to worker %v", t.taskName(), t.workerAddr)
+			req := &DoReduceTaskRequest{
+				InputDir:       t.inputDir,
+				ExecutableApp:  t.executableApp,
+				JobName:        t.jobName,
+				TaskId:         t.taskId,
+				TaskName:       t.taskName(),
+				MapOutputInfos: t.mapOutputInfos,
+				OutputDir:      t.outputDir,
+			}
+			reply := &DoReduceTaskResponse{}
+			if s.master.callWorker(t.workerAddr, "Worker.DoReduceTask", req, reply) == false {
+				Errorf("distributing reduce task %v to worker %v failed", t.taskName(), t.workerAddr)
+			}
+			if reply.State == Successful {
+				atomic.AddInt32(&completedTasks, 1)
+				Infof("job %v is in reduce stage, %v/%v reduce task completed", jobname, atomic.LoadInt32(&completedTasks), len(tasks))
+			}
+
+		}(t)
+	}
+
+	wg.Wait()
+	Infof("job %v finished reduce stage", jobname)
 }
 
 func (s *Scheduler) genMapTasks(j job) []*mapTask {
@@ -73,15 +134,14 @@ func (s *Scheduler) genMapTasks(j job) []*mapTask {
 
 	s.cHash.RLock()
 	for _, i := range j.input {
-		w, _ := s.cHash.Get(i)
 		t := &mapTask{
 			inputFile:     i,
-			outputFile:    fmt.Sprintf("map-%v-%v", j.name, id),
 			taskId:        id,
-			workerAddr:    w,
 			jobName:       j.name,
 			executableApp: j.executableApp,
+			nReduce:       j.nReduce,
 		}
+		t.workerAddr, _ = s.cHash.Get(t.taskName())
 		id++
 		tasks = append(tasks, t)
 	}
@@ -90,12 +150,33 @@ func (s *Scheduler) genMapTasks(j job) []*mapTask {
 	return tasks
 }
 
-func mapStage(j job) {
+func (s *Scheduler) genReduceTasks(j job, maptasks []*mapTask) []*reduceTask {
+	tasks := make([]*reduceTask, 0)
+	id := 0
 
-}
+	mapOutputInfo := make([]MapOutputInfo, 0)
+	for _, t := range maptasks {
+		mapOutputInfo = append(mapOutputInfo, MapOutputInfo{
+			MapTaskId:  t.taskId,
+			WorkerAddr: t.workerAddr,
+		})
+	}
 
-func reduceStage() {
-
+	s.cHash.RLock()
+	for ; id < j.nReduce; id++ {
+		t := &reduceTask{
+			jobName:        j.name,
+			taskId:         id,
+			inputDir:       filepath.Join(tempDir, j.name),
+			outputDir:      j.outputDir,
+			executableApp:  j.executableApp,
+			mapOutputInfos: mapOutputInfo,
+		}
+		t.workerAddr, _ = s.cHash.Get(t.taskName())
+		tasks = append(tasks, t)
+	}
+	s.cHash.RUnlock()
+	return tasks
 }
 
 func getAvailableWorkersAddr(wi workerInfos) []string {

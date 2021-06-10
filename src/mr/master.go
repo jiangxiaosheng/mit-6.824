@@ -32,8 +32,9 @@ type job struct {
 	endDate       time.Time
 	state         stage
 	input         []string
-	output        []string
+	outputDir     string
 	executableApp string
+	nReduce       int
 }
 
 func (m *Master) RunMR(req *RunMRRequest, resp *RunMRResponse) error {
@@ -44,8 +45,11 @@ func (m *Master) RunMR(req *RunMRRequest, resp *RunMRResponse) error {
 		state:         submitted,
 		input:         req.Inputs,
 		executableApp: req.ExecutableApp,
+		outputDir:     req.OutputDir,
+		nReduce:       req.NReduce,
 	}
 	m.scheduler.Schedule(j)
+	Infof("mr job %v is completed, all outputs have been written to directory %v", req.JobName, req.OutputDir)
 	return nil
 }
 
@@ -175,7 +179,7 @@ func (m *Master) init() {
 // main/mrmaster.go calls this function.
 // nReduce is the number of reduce tasks to use.
 //
-func MakeMaster(ctx context.Context, files []string, nReduce int) {
+func MakeMaster(ctx context.Context) {
 	m := Master{}
 	m.context = ctx
 	m.rpcClients = make(map[string]*rpc.Client)

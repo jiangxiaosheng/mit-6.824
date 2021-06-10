@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"log"
 	"os"
+	"sync"
 )
 
 type chunk struct {
@@ -15,6 +16,7 @@ type chunks []chunk
 
 var (
 	DebugMode = false
+	logMutex  = &sync.Mutex{}
 )
 
 // getFileSize returns the size in byte of the specified filename
@@ -38,11 +40,15 @@ func containsKey(m map[interface{}]interface{}, k interface{}) bool {
 }
 
 func Infof(format string, a ...interface{}) {
+	logMutex.Lock()
+	defer logMutex.Unlock()
 	format = fmt.Sprintf("[INFO] %v", format)
 	log.Printf(format, a...)
 }
 
 func Infoln(a ...interface{}) {
+	logMutex.Lock()
+	defer logMutex.Unlock()
 	if len(a) == 0 {
 		log.Println()
 		return
@@ -55,11 +61,15 @@ func Infoln(a ...interface{}) {
 }
 
 func Errorf(format string, a ...interface{}) {
+	logMutex.Lock()
+	defer logMutex.Unlock()
 	format = fmt.Sprintf("[ERROR] %v", format)
 	log.Printf(format, a...)
 }
 
 func Errorln(a ...interface{}) {
+	logMutex.Lock()
+	defer logMutex.Unlock()
 	if len(a) == 0 {
 		log.Println()
 		return
@@ -72,6 +82,8 @@ func Errorln(a ...interface{}) {
 }
 
 func Debugf(format string, a ...interface{}) {
+	logMutex.Lock()
+	defer logMutex.Unlock()
 	if DebugMode {
 		format = fmt.Sprintf("[DEBUG] %v", format)
 		log.Printf(format, a...)
@@ -79,6 +91,8 @@ func Debugf(format string, a ...interface{}) {
 }
 
 func Debugln(a ...interface{}) {
+	logMutex.Lock()
+	defer logMutex.Unlock()
 	if DebugMode {
 		if len(a) == 0 {
 			log.Println()
