@@ -39,7 +39,7 @@ func randomizeJobName(jn string) string {
 }
 
 var (
-	jobName       = flag.String("jobname", randomizeJobName("default-mr"), "Optional. the name of the job")
+	jobName       = flag.String("jobname", "default-mr", "Optional. the name of the job")
 	nReduce       = flag.Int("nReduce", 1, "Optional. the number of reducers")
 	inputFiles    = flag.String("inputs", "", `Required. input files, supporting the "*" wildcard character`)
 	outputDir     = flag.String("output", "", `Required. the directory where the outputs will be written to`)
